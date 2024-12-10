@@ -14,7 +14,14 @@ public:
     ~StreamWriter();
 
     void OpenOutputFile(const char* outFilename, int width, int height, AVRational fps);
-    void WriteVideoPacket(const uint8_t* data, size_t size, bool isKeyFrame, int64_t pts, int64_t duration);
+    void WriteVideoPacket(
+        const uint8_t* data,
+        size_t size,
+        bool isKeyFrame,
+        int64_t pts,
+        int64_t dts,
+        int64_t duration);
+
     void Finalize();
 
 private:

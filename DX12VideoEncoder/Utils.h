@@ -1,4 +1,5 @@
 #pragma once
+#include <string_view>
 
 namespace DX12VideoEncoding {
 
@@ -14,6 +15,6 @@ enum class LogLevel : int
     E_NONE,
 };
 
-}
+void LogMessage(LogLevel level, std::string_view message);
 
-void debug_printf(const char* format, ...);
+}

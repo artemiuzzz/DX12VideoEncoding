@@ -79,7 +79,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>./;./thirdparty</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;./private;./thirdparty</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -98,7 +98,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>./;./thirdparty</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;./private;./thirdparty</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -117,7 +117,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>./;./thirdparty</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;./private;./thirdparty</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -136,7 +136,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <AdditionalIncludeDirectories>./;./thirdparty</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./;./private;./thirdparty</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -147,11 +147,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="Encoder.h" />
-    <ClInclude Include="FrameNV12.h" />
-    <ClInclude Include="framework.h" />
-    <ClInclude Include="pch.h" />
-    <ClInclude Include="ReferenceFramesManager.h" />
+    <ClInclude Include="private\EncoderH264.h" />
+    <ClInclude Include="EncoderAPI.h" />
+    <ClInclude Include="private\EncoderH264DX12.h" />
+    <ClInclude Include="private\framework.h" />
+    <ClInclude Include="private\GalliumHelpers.h" />
+    <ClInclude Include="private\InputFrameResources.h" />
+    <ClInclude Include="private\pch.h" />
+    <ClInclude Include="private\ReferenceFramesManager.h" />
     <ClInclude Include="thirdparty\gallium\d3d12_video_encoder_bitstream.h" />
     <ClInclude Include="thirdparty\gallium\d3d12_video_encoder_bitstream_builder.h" />
     <ClInclude Include="thirdparty\gallium\d3d12_video_encoder_bitstream_builder_h264.h" />
@@ -159,18 +162,21 @@
     <ClInclude Include="Utils.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Encoder.cpp" />
-    <ClCompile Include="pch.cpp">
+    <ClCompile Include="private\EncoderH264.cpp" />
+    <ClCompile Include="private\EncoderH264DX12.cpp" />
+    <ClCompile Include="private\GalliumHelpers.cpp" />
+    <ClCompile Include="private\InputFrameResources.cpp" />
+    <ClCompile Include="private\pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="ReferenceFramesManager.cpp" />
+    <ClCompile Include="private\ReferenceFramesManager.cpp" />
     <ClCompile Include="thirdparty\gallium\d3d12_video_encoder_bitstream.cpp" />
     <ClCompile Include="thirdparty\gallium\d3d12_video_encoder_bitstream_builder_h264.cpp" />
     <ClCompile Include="thirdparty\gallium\d3d12_video_encoder_nalu_writer_h264.cpp" />
-    <ClCompile Include="Utils.cpp" />
+    <ClCompile Include="private\Utils.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

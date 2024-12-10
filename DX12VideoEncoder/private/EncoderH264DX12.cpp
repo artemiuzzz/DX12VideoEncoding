@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "Encoder.h"
+#include "EncoderH264DX12.h"
 #include "Utils.h"
 #include "gallium/d3d12_video_encoder_bitstream_builder_h264.h"
 
@@ -36,6 +36,48 @@ void ThrowEncodingError(UINT64 encodeErrorFlags)
     throw std::runtime_error(error);
 }
 
+void ThrowEncoderSupportError(D3D12_VIDEO_ENCODER_VALIDATION_FLAGS validationFlags)
+{
+    std::string error("Encoder support error:");
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_CODEC_NOT_SUPPORTED & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_CODEC_NOT_SUPPORTED");
+    }
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_INPUT_FORMAT_NOT_SUPPORTED & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_INPUT_FORMAT_NOT_SUPPORTED");
+    }
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_CODEC_CONFIGURATION_NOT_SUPPORTED & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_CODEC_CONFIGURATION_NOT_SUPPORTED");
+    }
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_RATE_CONTROL_MODE_NOT_SUPPORTED & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_RATE_CONTROL_MODE_NOT_SUPPORTED");
+    }
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_RATE_CONTROL_CONFIGURATION_NOT_SUPPORTED & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_RATE_CONTROL_CONFIGURATION_NOT_SUPPORTED");
+    }
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_INTRA_REFRESH_MODE_NOT_SUPPORTED & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_INTRA_REFRESH_MODE_NOT_SUPPORTED");
+    }
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_SUBREGION_LAYOUT_MODE_NOT_SUPPORTED & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_SUBREGION_LAYOUT_MODE_NOT_SUPPORTED");
+    }
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_RESOLUTION_NOT_SUPPORTED_IN_LIST & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_RESOLUTION_NOT_SUPPORTED_IN_LIST");
+    }
+    if (D3D12_VIDEO_ENCODER_VALIDATION_FLAG_GOP_STRUCTURE_NOT_SUPPORTED & validationFlags)
+    {
+        error.append("\nD3D12_VIDEO_ENCODER_VALIDATION_FLAG_GOP_STRUCTURE_NOT_SUPPORTED");
+    }
+    throw std::runtime_error(error);
+}
+
 D3D12_BOX H264FrameCroppingBox(D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC resolution)
 {
     const UINT mbWidth = (resolution.Width + 15) / 16;
@@ -51,10 +93,12 @@ D3D12_BOX H264FrameCroppingBox(D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC resol
 
 }
 
-Encoder::Encoder(const ComPtr<ID3D12Device> &device,
-    const Configuration& config)
+EncoderH264DX12::EncoderH264DX12(const ComPtr<ID3D12Device> &device,
+    const EncoderConfiguration& config,
+    DXGI_FORMAT inputFormat)
     : m_device(device)
     , m_maxReferenceFrameCount(config.maxReferenceFrameCount)
+    , m_inputFormat(inputFormat)
     , m_bitstreamBuilder(std::make_unique<d3d12_video_bitstream_builder_h264>())
 {
     ThrowIfFailed(m_device->QueryInterface(IID_PPV_ARGS(&m_videoDevice)));
@@ -62,27 +106,37 @@ Encoder::Encoder(const ComPtr<ID3D12Device> &device,
     Configure(config);
 }
 
-Encoder::~Encoder() = default;
+EncoderH264DX12::~EncoderH264DX12() = default;
 
-void Encoder::Flush()
-{
-    m_flushRequested = true;
-}
-
-bool Encoder::IsFlushed() const
-{
-    return m_isFlushed;
-}
-
-void Encoder::Configure(const Configuration& config)
+void EncoderH264DX12::Configure(const EncoderConfiguration& config)
 {
     m_resolutionDesc.Width = config.width;
     m_resolutionDesc.Height = config.height;
     m_frameCropping = H264FrameCroppingBox(m_resolutionDesc);
-    m_targetFramerate = config.fps;
+    m_targetFramerate.Numerator = config.fps.numerator;
+    m_targetFramerate.Denominator = config.fps.denominator;
+
+    m_h264GopStructure = ConfigureGOPStructure(config.keyFrameInterval, config.bFramesCount);
+    m_gopStructure.pH264GroupOfPictures = &m_h264GopStructure;
+    m_gopStructure.DataSize = sizeof(m_h264GopStructure);
 
     m_profileDesc.pH264Profile = &m_h264Profile;
     m_profileDesc.DataSize = sizeof(m_h264Profile);
+
+    m_codecConfiguration.pH264Config = &m_codecH264Config;
+    m_codecConfiguration.DataSize = sizeof(m_codecH264Config);
+
+    m_rateControl.Mode = D3D12_VIDEO_ENCODER_RATE_CONTROL_MODE_CQP;
+    m_rateControlCQP = D3D12_VIDEO_ENCODER_RATE_CONTROL_CQP{
+        .ConstantQP_FullIntracodedFrame = 30,
+        .ConstantQP_InterPredictedFrame_PrevRefOnly = 30,
+        .ConstantQP_InterPredictedFrame_BiDirectionalRef = 30,
+    };
+    m_rateControl.ConfigParams.DataSize = sizeof(m_rateControlCQP);
+    m_rateControl.ConfigParams.pConfiguration_CQP = &m_rateControlCQP;
+    m_rateControl.Flags = D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_NONE;
+    m_rateControl.TargetFrameRate = m_targetFramerate;
+
 
     D3D12_FEATURE_DATA_VIDEO_ENCODER_PROFILE_LEVEL profileLevel = {};
     profileLevel.Codec = D3D12_VIDEO_ENCODER_CODEC_H264;
@@ -119,10 +173,11 @@ void Encoder::Configure(const Configuration& config)
     D3D12_FEATURE_DATA_VIDEO_ENCODER_INPUT_FORMAT inputFormat = {};
     inputFormat.Codec = D3D12_VIDEO_ENCODER_CODEC_H264;
     inputFormat.Profile = profileLevel.Profile;
-    inputFormat.Format = DXGI_FORMAT_NV12;
-
+    inputFormat.Format = m_inputFormat;
     ThrowIfFailed(m_videoDevice->CheckFeatureSupport(D3D12_FEATURE_VIDEO_ENCODER_INPUT_FORMAT,
         &inputFormat, sizeof(inputFormat)));
+
+    ThrowIfFalse(inputFormat.IsSupported == TRUE);
 
 
     m_resourceRequirements.Codec = D3D12_VIDEO_ENCODER_CODEC_H264;
@@ -139,14 +194,44 @@ void Encoder::Configure(const Configuration& config)
         m_resourceRequirements.EncoderMetadataBufferAccessAlignment);
 
 
+    D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC resolutionDescList[] = { m_resolutionDesc };
+
+    D3D12_FEATURE_DATA_VIDEO_ENCODER_SUPPORT encoderSupport = {};
+    encoderSupport.Codec = D3D12_VIDEO_ENCODER_CODEC_H264;
+    encoderSupport.InputFormat = inputFormat.Format;
+    encoderSupport.CodecConfiguration = m_codecConfiguration;
+    encoderSupport.CodecGopSequence = m_gopStructure;
+    encoderSupport.RateControl = m_rateControl;
+    encoderSupport.IntraRefresh = D3D12_VIDEO_ENCODER_INTRA_REFRESH_MODE_NONE;
+    encoderSupport.SubregionFrameEncoding = D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_FULL_FRAME;
+    encoderSupport.ResolutionsListCount = _countof(resolutionDescList);;
+    encoderSupport.pResolutionList = resolutionDescList;
+    encoderSupport.MaxReferenceFramesInDPB = m_maxReferenceFrameCount;
+
+    D3D12_VIDEO_ENCODER_LEVELS_H264 receivedLevel = {};
+    encoderSupport.SuggestedLevel.DataSize = sizeof(receivedLevel);
+    encoderSupport.SuggestedLevel.pH264LevelSetting = &receivedLevel;
+
+    D3D12_VIDEO_ENCODER_PROFILE_H264 receivedProfile = {};
+    encoderSupport.SuggestedProfile.DataSize = sizeof(receivedProfile);
+    encoderSupport.SuggestedProfile.pH264Profile = &receivedProfile;
+
+    std::vector<D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOLUTION_SUPPORT_LIMITS> resolutionLimits{ encoderSupport.ResolutionsListCount };
+    encoderSupport.pResolutionDependentSupport = resolutionLimits.data();
+
+    ThrowIfFailed(m_videoDevice->CheckFeatureSupport(D3D12_FEATURE_VIDEO_ENCODER_SUPPORT,
+        &encoderSupport, sizeof(encoderSupport)));
+
+    if ((encoderSupport.SupportFlags & D3D12_VIDEO_ENCODER_SUPPORT_FLAG_GENERAL_SUPPORT_OK) == 0)
+    {
+        ThrowEncoderSupportError(encoderSupport.ValidationFlags);
+    }
+
+
     D3D12_VIDEO_ENCODER_DESC encoderDesc = {};
     encoderDesc.EncodeCodec = D3D12_VIDEO_ENCODER_CODEC_H264;
-
     encoderDesc.EncodeProfile = profileLevel.Profile;
-    encoderDesc.InputFormat = DXGI_FORMAT_NV12;
-
-    m_codecConfiguration.pH264Config = &m_codecH264Config;
-    m_codecConfiguration.DataSize = sizeof(m_codecH264Config);
+    encoderDesc.InputFormat = m_inputFormat;
     encoderDesc.CodecConfiguration = m_codecConfiguration;
 
     ThrowIfFailed(m_videoDevice->CreateVideoEncoder(&encoderDesc, IID_PPV_ARGS(&m_videoEncoder)));
@@ -158,65 +243,68 @@ void Encoder::Configure(const Configuration& config)
     encoderHeapDesc.EncodeProfile = encoderDesc.EncodeProfile;
     encoderHeapDesc.EncodeLevel.pHEVCLevelSetting = nullptr;
     encoderHeapDesc.EncodeLevel = maxLevel;
-
-
-    D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC resolutionDescList[] = { m_resolutionDesc };
     encoderHeapDesc.ResolutionsListCount = _countof(resolutionDescList);
     encoderHeapDesc.pResolutionList = resolutionDescList;
 
     ThrowIfFailed(m_videoDevice->CreateVideoEncoderHeap(&encoderHeapDesc, IID_PPV_ARGS(&m_videoEncoderHeap)));
 
-    ConfigureGOPStructure(config.gopLengthInFrames, config.usePframes);
+    bool gopHasInterFrames =
+        (m_h264GopStructure.PPicturePeriod > 0) &&
+        ((m_h264GopStructure.GOPLength == 0) || (m_h264GopStructure.PPicturePeriod < m_h264GopStructure.GOPLength));
 
     m_referenceFramesManager = std::make_unique<ReferenceFramesManager>(
-        m_maxReferenceFrameCount, config.usePframes, m_device, m_resolutionDesc);
+        m_device, m_resolutionDesc, m_inputFormat, m_maxReferenceFrameCount, gopHasInterFrames);
 
-    CreateInputResource();
     CreateOutputBufferResource();
     CreateEncodeCommand();
-    CreateInputCommand();
     CreateOutputCommand();
 }
 
-void Encoder::ConfigureGOPStructure(UINT gopLengthInFrames, bool usePframes)
+D3D12_VIDEO_ENCODER_SEQUENCE_GOP_STRUCTURE_H264
+EncoderH264DX12::ConfigureGOPStructure(UINT gopLengthInFrames, UINT bFramesCount)
 {
-    m_h264GopStructure.GOPLength = usePframes ? gopLengthInFrames : 1;
-    m_h264GopStructure.PPicturePeriod = usePframes ? 1 /* Without B frames */ : 0;
+    D3D12_VIDEO_ENCODER_SEQUENCE_GOP_STRUCTURE_H264 h264GopStructure = {};
+    h264GopStructure.GOPLength = gopLengthInFrames;
+    h264GopStructure.PPicturePeriod = gopLengthInFrames == 1 /*Key frames only*/ ? 0 : bFramesCount + 1;
+    h264GopStructure.pic_order_cnt_type = 0;
 
-    m_h264GopStructure.pic_order_cnt_type = 0;
-    const uint32_t max_pic_order_cnt_lsb = 2 * m_h264GopStructure.GOPLength;
-    const uint32_t max_max_frame_num = m_h264GopStructure.GOPLength;
+    // @todo: This is temp fix for infinite GOP.
+    auto GOPLength = h264GopStructure.GOPLength == 0 ? (1 << 15) : h264GopStructure.GOPLength;
+
+    const uint32_t max_pic_order_cnt_lsb = 2 * GOPLength;
+    const uint32_t max_max_frame_num = GOPLength;
     double log2_max_frame_num_minus4 = (std::max)(0.0, std::ceil(std::log2(max_max_frame_num)) - 4);
     double log2_max_pic_order_cnt_lsb_minus4 = (std::max)(0.0, std::ceil(std::log2(max_pic_order_cnt_lsb)) - 4);
     assert(log2_max_frame_num_minus4 < UCHAR_MAX);
     assert(log2_max_pic_order_cnt_lsb_minus4 < UCHAR_MAX);
-    m_h264GopStructure.log2_max_frame_num_minus4 = static_cast<UCHAR>(log2_max_frame_num_minus4);
-    m_h264GopStructure.log2_max_pic_order_cnt_lsb_minus4 = static_cast<UCHAR>(log2_max_pic_order_cnt_lsb_minus4);
+    h264GopStructure.log2_max_frame_num_minus4 = static_cast<UCHAR>(log2_max_frame_num_minus4);
+    h264GopStructure.log2_max_pic_order_cnt_lsb_minus4 = static_cast<UCHAR>(log2_max_pic_order_cnt_lsb_minus4);
+    
+    assert(h264GopStructure.log2_max_pic_order_cnt_lsb_minus4 >=0
+        && h264GopStructure.log2_max_pic_order_cnt_lsb_minus4 <= 12);
 
-    m_gopStructure.pH264GroupOfPictures = &m_h264GopStructure;
-    m_gopStructure.DataSize = sizeof(m_h264GopStructure);
+    return h264GopStructure;
 }
 
-void Encoder::SendFrame(const FrameNV12& frame)
+void EncoderH264DX12::SendFrame(const InputFrame& inputFrame, const InputFrameResources& inputFrameResources)
 {
     // Resolution change is not supported for now.
-    ThrowIfFalse((frame.height == m_resolutionDesc.Height) && (frame.width == m_resolutionDesc.Width));
+    ThrowIfFalse((inputFrameResources.GetHeight() == m_resolutionDesc.Height)
+        && (inputFrameResources.GetWidth() == m_resolutionDesc.Width));
 
-    CopyFrameToInputTexture(frame);
-
-    m_consumerToEncoderSemaphore.acquire();
+    m_currentFrame = inputFrame;
 
     // Wait on GPU for completion of copying the frame to input texture.
-    ThrowIfFailed(m_encodeCommandQueue->Wait(m_inputTextureFence.Get(), m_inputTextureFenceValue));
+    inputFrameResources.WaitForUploadingGPU(m_encodeCommandQueue.Get());
 
-    UpdateCurrentFrameInfo();
-    bool isCurrentFrameUsedAsReference = true;
+    UpdateCurrentFrameInfo(m_currentFrame);
+    bool isCurrentFrameUsedAsReference = m_currentFrame.useAsReference;
     m_referenceFramesManager->PrepareForEncodingFrame(m_curPicParamsData, isCurrentFrameUsedAsReference);
     m_referenceFramesManager->GetPictureControlCodecData(m_curPicParamsData);
 
 
     D3D12_RESOURCE_BARRIER currentFrameStateTransitions[] = {
-        CD3DX12_RESOURCE_BARRIER::Transition(m_encoderInputResource.Get(),
+        CD3DX12_RESOURCE_BARRIER::Transition(inputFrameResources.GetInputTextureRawPtr(),
             D3D12_RESOURCE_STATE_COMMON,
             D3D12_RESOURCE_STATE_VIDEO_ENCODE_READ),
         CD3DX12_RESOURCE_BARRIER::Transition(m_outputBitrstreamBuffer.Get(),
@@ -268,18 +356,6 @@ void Encoder::SendFrame(const FrameNV12& frame)
         m_bitstreamHeadersBuffer.resize(prefixGeneratedHeadersByteSize, 0);
     }
 
-    D3D12_VIDEO_ENCODER_RATE_CONTROL rateControl = {};
-    rateControl.Mode = D3D12_VIDEO_ENCODER_RATE_CONTROL_MODE_CQP;
-    D3D12_VIDEO_ENCODER_RATE_CONTROL_CQP rateControlCQP = {
-        30, // ConstantQP_FullIntracodedFrame
-        30, // ConstantQP_InterPredictedFrame_PrevRefOnly
-        30, // ConstantQP_InterPredictedFrame_BiDirectionalRef
-    };
-    rateControl.ConfigParams.DataSize = sizeof(rateControlCQP);
-    rateControl.ConfigParams.pConfiguration_CQP = &rateControlCQP;
-    rateControl.Flags = D3D12_VIDEO_ENCODER_RATE_CONTROL_FLAG_NONE;
-    rateControl.TargetFrameRate = m_targetFramerate;
-
     D3D12_VIDEO_ENCODER_PICTURE_CONTROL_FLAGS pictureControlFlags = D3D12_VIDEO_ENCODER_PICTURE_CONTROL_FLAG_NONE;
     D3D12_VIDEO_ENCODER_RECONSTRUCTED_PICTURE reconstructedPicture = m_referenceFramesManager->GetReconstructedPicture();
     if (reconstructedPicture.pReconstructedPicture != nullptr)
@@ -296,7 +372,7 @@ void Encoder::SendFrame(const FrameNV12& frame)
                 .Mode = D3D12_VIDEO_ENCODER_INTRA_REFRESH_MODE_NONE,
                 .IntraRefreshDuration = 0,
             },
-            .RateControl = rateControl,
+            .RateControl = m_rateControl,
             .PictureTargetResolution = m_resolutionDesc,
             .SelectedLayoutMode = D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_FULL_FRAME,
             .FrameSubregionsLayoutData = {},
@@ -311,7 +387,7 @@ void Encoder::SendFrame(const FrameNV12& frame)
             .ReferenceFrames = referenceFrames,
         },
 
-        .pInputFrame = m_encoderInputResource.Get(),
+        .pInputFrame = inputFrameResources.GetInputTextureRawPtr(),
         .InputFrameSubresource = 0,
         .CurrentFrameBitstreamMetadataSize = prefixGeneratedHeadersByteSize,
     };
@@ -348,7 +424,7 @@ void Encoder::SendFrame(const FrameNV12& frame)
         CD3DX12_RESOURCE_BARRIER::Transition(m_metadataOutputBuffer.Get(),
             D3D12_RESOURCE_STATE_VIDEO_ENCODE_WRITE,
             D3D12_RESOURCE_STATE_VIDEO_ENCODE_READ),
-        CD3DX12_RESOURCE_BARRIER::Transition(m_encoderInputResource.Get(),
+        CD3DX12_RESOURCE_BARRIER::Transition(inputFrameResources.GetInputTextureRawPtr(),
             D3D12_RESOURCE_STATE_VIDEO_ENCODE_READ,
             D3D12_RESOURCE_STATE_COMMON),
         CD3DX12_RESOURCE_BARRIER::Transition(m_outputBitrstreamBuffer.Get(),
@@ -364,7 +440,7 @@ void Encoder::SendFrame(const FrameNV12& frame)
     const D3D12_VIDEO_ENCODER_RESOLVE_METADATA_INPUT_ARGUMENTS inputMetadataArgs = {
         .EncoderCodec = D3D12_VIDEO_ENCODER_CODEC_H264,
         .EncoderProfile = m_profileDesc,
-        .EncoderInputFormat = DXGI_FORMAT_NV12,
+        .EncoderInputFormat = m_inputFormat,
         .EncodedPictureEffectiveResolution = m_resolutionDesc,
         .HWLayoutMetadata = D3D12_VIDEO_ENCODER_ENCODE_OPERATION_METADATA_BUFFER
         {
@@ -406,13 +482,9 @@ void Encoder::SendFrame(const FrameNV12& frame)
     m_encodeCommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
 
     ThrowIfFailed(m_encodeCommandQueue->Signal(m_encoderFence.Get(), m_encoderFenceValue));
-
-    // Waiting on CPU because copying may not have completed yet,
-    // and if we go out of scope, raw data can become unavailable.
-    WaitForInputTexture();
 }
 
-D3D12_VIDEO_ENCODER_OUTPUT_METADATA Encoder::ReadResolvedMetadata()
+D3D12_VIDEO_ENCODER_OUTPUT_METADATA EncoderH264DX12::ReadResolvedMetadata()
 {
     D3D12_VIDEO_ENCODER_OUTPUT_METADATA metadata;
     const auto metadataBufferSize = sizeof(metadata);
@@ -430,33 +502,25 @@ D3D12_VIDEO_ENCODER_OUTPUT_METADATA Encoder::ReadResolvedMetadata()
     return metadata;
 }
 
-std::shared_ptr<Encoder::EncodedFrame> Encoder::ReadEncodedData()
+void EncoderH264DX12::ReadEncodedData(std::vector<uint8_t>& encodedData)
 {
     const D3D12_VIDEO_ENCODER_OUTPUT_METADATA metadata = ReadResolvedMetadata();
     auto encodedFrameSize = metadata.EncodedBitstreamWrittenBytesCount + m_bitstreamHeadersBuffer.size();
     assert(encodedFrameSize);
 
-    auto encodedFrame = std::make_shared<EncodedFrame>();
-    encodedFrame->encodedData.resize(encodedFrameSize);
+    encodedData.resize(encodedFrameSize);
 
     void* encodedFrameData = nullptr;
     D3D12_RANGE readRange = { 0, encodedFrameSize };
     ThrowIfFailed(m_outputBitrstreamBuffer->Map(0, &readRange, &encodedFrameData));
-    memcpy(encodedFrame->encodedData.data(), encodedFrameData, encodedFrameSize);
+    memcpy(encodedData.data(), encodedFrameData, encodedFrameSize);
     m_outputBitrstreamBuffer->Unmap(0, nullptr);
-
-    encodedFrame->displayOrderNumber = m_currentFrame.displayOrderNumber;
-    encodedFrame->isKeyFrame =
-        (m_curPicParamsData.pH264PicData->FrameType == D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_I_FRAME)
-        || (m_curPicParamsData.pH264PicData->FrameType == D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_IDR_FRAME);
-
-    return encodedFrame;
 }
 
-uint32_t Encoder::BuildCodecHeadersH264()
+uint32_t EncoderH264DX12::BuildCodecHeadersH264()
 {
     size_t writtenSPSBytesCount = 0;
-    bool isFirstFrame = (m_encoderFenceValue.load() == 1);
+    bool isFirstFrame = (m_encoderFenceValue == 1);
     bool writeNewSPS = isFirstFrame;
 
     uint32_t activeSeqParameterSetId = m_bitstreamBuilder->get_active_sps_id();
@@ -470,7 +534,7 @@ uint32_t Encoder::BuildCodecHeadersH264()
         }
         m_bitstreamBuilder->build_sps(*m_profileDesc.pH264Profile,
             m_selectedLevel,
-            DXGI_FORMAT_NV12,
+            m_inputFormat,
             *m_codecConfiguration.pH264Config,
             *m_gopStructure.pH264GroupOfPictures,
             activeSeqParameterSetId,
@@ -500,101 +564,34 @@ uint32_t Encoder::BuildCodecHeadersH264()
     return m_bitstreamHeadersBuffer.size();
 }
 
-void Encoder::PrepareForNextFrame()
+void EncoderH264DX12::PrepareForNextFrame()
 {
     ThrowIfFailed(m_encodeCommandAllocator->Reset());
     ThrowIfFailed(m_encodeCommandList->Reset(m_encodeCommandAllocator.Get()));
-    m_encoderFenceValue.fetch_add(1);
-
-    ++m_currentFrame.displayOrderNumber;
-
-    if(m_h264PicData.FrameType == D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_IDR_FRAME)
-        ++m_currentFrame.idrPicId;
+    ++m_encoderFenceValue;
 
     m_referenceFramesManager->UpdateReferenceFrames();
 }
 
-void Encoder::UpdateCurrentFrameInfo()
+void EncoderH264DX12::UpdateCurrentFrameInfo(InputFrame& inputFrame)
 {
-    // @note: Only I and P frames are supported. Each I frame is IDR.
-    // 
-    // Define frame type from order count number.
-    if (m_currentFrame.displayOrderNumber == 0)
-    {
-        // First frame.
-        m_h264PicData.FrameType = D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_IDR_FRAME;
-    }
-    else if (m_gopStructure.pH264GroupOfPictures->GOPLength == 0)
-    {
-        // Infinite GOP, only the first frame is intra.
-        m_h264PicData.FrameType = D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_P_FRAME;
-    }
-    else
-    {
-        if (m_gopStructure.pH264GroupOfPictures->PPicturePeriod == 0)
-        {
-            // GOP with only IDR frames.
-            m_h264PicData.FrameType = D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_IDR_FRAME;
-        }
-        else
-        {
-            UINT orderNumberInGop =
-                (m_currentFrame.displayOrderNumber / m_gopStructure.pH264GroupOfPictures->GOPLength) == 0
-                ? m_currentFrame.displayOrderNumber
-                : (m_currentFrame.displayOrderNumber % m_gopStructure.pH264GroupOfPictures->GOPLength);
-
-            if(orderNumberInGop == 0)
-                m_h264PicData.FrameType = D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_IDR_FRAME;
-            else
-                m_h264PicData.FrameType = D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_P_FRAME;
-        }
-    }
-
     m_h264PicData.pic_parameter_set_id = m_bitstreamBuilder->get_active_pps_id();
-    m_h264PicData.idr_pic_id = m_currentFrame.idrPicId;
+    m_h264PicData.FrameType = inputFrame.frameType;
+    m_h264PicData.idr_pic_id = inputFrame.idrPicId;
 
-    if (m_h264PicData.FrameType == D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_IDR_FRAME)
-    {
-        m_h264PicData.PictureOrderCountNumber = 0;
-        m_currentFrame.lastIdrNumber = m_currentFrame.displayOrderNumber;
-    }
-    else
-    {
-        m_h264PicData.PictureOrderCountNumber = m_currentFrame.displayOrderNumber - m_currentFrame.lastIdrNumber;
-    }
+    m_h264PicData.PictureOrderCountNumber = inputFrame.pictureOrderCountNumber;
+    m_h264PicData.FrameDecodingOrderNumber = inputFrame.decodingOrderNumber;
 
-    m_h264PicData.FrameDecodingOrderNumber = m_h264PicData.PictureOrderCountNumber;
-
-    m_h264PicData.List0ReferenceFramesCount = 0;
-    m_h264PicData.pList0ReferenceFrames = nullptr;
-    m_h264PicData.List1ReferenceFramesCount = 0;
-    m_h264PicData.pList1ReferenceFrames = nullptr;
-    m_currentFrame.list0ReferenceFramesCount.clear();
-
-    if (m_h264PicData.FrameType == D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_B_FRAME)
-    {
-        throw std::runtime_error("B frames are not supported");
-    }
-    else if (m_h264PicData.FrameType == D3D12_VIDEO_ENCODER_FRAME_TYPE_H264_P_FRAME)
-    {
-        // Fill l0 list.
-
-        // For now just use sequental last frames as reference.
-        const auto refFrameCount = m_referenceFramesManager->GetReferenceFrameCount();
-        for (auto i = 0; i < refFrameCount; ++i)
-        {
-            m_currentFrame.list0ReferenceFramesCount.push_back(i);
-        }
-
-        m_h264PicData.List0ReferenceFramesCount = m_currentFrame.list0ReferenceFramesCount.size();
-        m_h264PicData.pList0ReferenceFrames = m_currentFrame.list0ReferenceFramesCount.data();
-    }
+    m_h264PicData.List0ReferenceFramesCount = inputFrame.l0List.empty() ? 0 : inputFrame.l0List.size();
+    m_h264PicData.pList0ReferenceFrames = inputFrame.l0List.data();
+    m_h264PicData.List1ReferenceFramesCount = inputFrame.l1List.empty() ? 0 : inputFrame.l1List.size();
+    m_h264PicData.pList1ReferenceFrames = inputFrame.l1List.data();
 
     m_curPicParamsData.pH264PicData = &m_h264PicData;
     m_curPicParamsData.DataSize = sizeof(m_h264PicData);
 }
 
-void Encoder::UploadBitstreamHeaders()
+void EncoderH264DX12::UploadBitstreamHeaders()
 {
     auto prefixGeneratedHeadersByteSize = m_bitstreamHeadersBuffer.size();
     void* outputBitrstreamData = nullptr;
@@ -604,63 +601,7 @@ void Encoder::UploadBitstreamHeaders()
     m_outputBitrstreamBuffer->Unmap(0, nullptr);
 }
 
-void Encoder::CopyFrameToInputTexture(const FrameNV12& frame)
-{
-    // Starts copying the frame to input texture.
-
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint[2];
-    UINT numRows[2];
-    UINT64 rowBytes[2];
-    UINT64 totalBytes;
-    auto inputTextureDesc = m_encoderInputResource->GetDesc();
-    m_device->GetCopyableFootprints(&inputTextureDesc, 0, 2, 0, footprint, numRows, rowBytes, &totalBytes);
-
-    D3D12_SUBRESOURCE_DATA frameData[2] = {};
-    frameData[0].pData = frame.pY;
-    frameData[0].RowPitch = frame.linesizeY;
-    frameData[0].SlicePitch = frame.linesizeY * frame.height;
-
-    frameData[1].pData = frame.pUV;
-    frameData[1].RowPitch = frame.linesizeUV;
-    frameData[1].SlicePitch = frame.linesizeUV * frame.height / 2;
-
-    auto requiredSize = UpdateSubresources(m_inputTextureCommandList.Get(),
-        m_encoderInputResource.Get(),
-        m_frameUploadBuffer.Get(),
-        0, // FirstSubresource
-        2, // NumSubresources
-        totalBytes, // UINT64 RequiredSize
-        footprint,
-        numRows,
-        rowBytes,
-        frameData
-    );
-    assert(requiredSize == totalBytes);
-
-    const CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        m_encoderInputResource.Get(),
-        D3D12_RESOURCE_STATE_COPY_DEST,
-        D3D12_RESOURCE_STATE_COMMON);
-    m_inputTextureCommandList->ResourceBarrier(1, &barrier);
-
-    ThrowIfFailed(m_inputTextureCommandList->Close());
-    ID3D12CommandList* commandLists[] = { m_inputTextureCommandList.Get() };
-    m_inputTextureCommandQueue->ExecuteCommandLists(_countof(commandLists), commandLists);
-
-    ThrowIfFailed(m_inputTextureCommandQueue->Signal(m_inputTextureFence.Get(), m_inputTextureFenceValue));
-}
-
-void Encoder::WaitForInputTexture()
-{
-    // Waits for copying to complete.
-
-    ThrowIfFailed(m_inputTextureFence->SetEventOnCompletion(m_inputTextureFenceValue, nullptr));
-    ThrowIfFailed(m_inputTextureCommandAllocator->Reset());
-    ThrowIfFailed(m_inputTextureCommandList->Reset(m_inputTextureCommandAllocator.Get(), nullptr));
-    ++m_inputTextureFenceValue;
-}
-
-void Encoder::CreateEncodeCommand()
+void EncoderH264DX12::CreateEncodeCommand()
 {
     m_encodeCommandQueue.Reset();
     m_encodeCommandAllocator.Reset();
@@ -685,32 +626,7 @@ void Encoder::CreateEncodeCommand()
     ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_encoderFence)));
 }
 
-void Encoder::CreateInputCommand()
-{
-    m_inputTextureCommandQueue.Reset();
-    m_inputTextureCommandAllocator.Reset();
-    m_inputTextureCommandList.Reset();
-    m_inputTextureFence.Reset();
-
-    D3D12_COMMAND_QUEUE_DESC queueDesc = { D3D12_COMMAND_LIST_TYPE_COPY };
-    ThrowIfFailed(m_device->CreateCommandQueue(
-        &queueDesc,
-        IID_PPV_ARGS(&m_inputTextureCommandQueue)));
-
-    ThrowIfFailed(m_device->CreateCommandAllocator(
-        queueDesc.Type,
-        IID_PPV_ARGS(&m_inputTextureCommandAllocator)));
-
-    ThrowIfFailed(m_device->CreateCommandList(0,
-        queueDesc.Type,
-        m_inputTextureCommandAllocator.Get(),
-        nullptr,
-        IID_PPV_ARGS(&m_inputTextureCommandList)));
-
-    ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_inputTextureFence)));
-}
-
-void Encoder::CreateOutputCommand()
+void EncoderH264DX12::CreateOutputCommand()
 {
     m_outputEncodedCommandQueue.Reset();
     m_outputEncodedCommandAllocator.Reset();
@@ -732,7 +648,7 @@ void Encoder::CreateOutputCommand()
         IID_PPV_ARGS(&m_outputEncodedCommandList)));
 }
 
-void Encoder::CreateOutputBufferResource()
+void EncoderH264DX12::CreateOutputBufferResource()
 {
     const CD3DX12_RESOURCE_DESC resolvedMetadataBufferDesc =
         CD3DX12_RESOURCE_DESC::Buffer(m_resolvedMetadataBufferSize);
@@ -784,76 +700,32 @@ void Encoder::CreateOutputBufferResource()
         IID_PPV_ARGS(&m_outputBitrstreamBuffer)));
 }
 
-void Encoder::CreateInputResource()
+bool EncoderH264DX12::WaitForEncodedData(Microsoft::WRL::Wrappers::Event& termintateEvent,
+    std::vector<uint8_t>& encodedData)
 {
-    D3D12_RESOURCE_DESC textureDesc = {};
-    textureDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    textureDesc.Alignment = 0;
-    textureDesc.Width = m_resolutionDesc.Width;
-    textureDesc.Height = m_resolutionDesc.Height;
-    textureDesc.DepthOrArraySize = 1;
-    textureDesc.MipLevels = 1;
-    textureDesc.Format = DXGI_FORMAT_NV12;
-    textureDesc.SampleDesc.Count = 1;
-    textureDesc.SampleDesc.Quality = 0;
-    textureDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    textureDesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-
-    m_encoderInputResource.Reset();
-    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
-    ThrowIfFailed(m_device->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &textureDesc,
-        D3D12_RESOURCE_STATE_COPY_DEST,
-        nullptr,
-        IID_PPV_ARGS(&m_encoderInputResource)
-    ));
-
-
-    m_frameUploadBuffer.Reset();
-
-    UINT64 totalBytes;
-    m_device->GetCopyableFootprints(&textureDesc, 0, 2, 0, nullptr, nullptr, nullptr, &totalBytes);
-
-    D3D12_HEAP_PROPERTIES uploadHeapProperties = { D3D12_HEAP_TYPE_UPLOAD };
-    CD3DX12_RESOURCE_DESC uploadBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(totalBytes);
-    ThrowIfFailed(m_device->CreateCommittedResource(
-        &uploadHeapProperties,
-        D3D12_HEAP_FLAG_NONE,
-        &uploadBufferDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&m_frameUploadBuffer)));
-}
-
-std::shared_ptr<Encoder::EncodedFrame> Encoder::WaitForEncodedFrame()
-{
-    if (IsFlushed())
-        return {};
-
-    if (m_encoderFence->GetCompletedValue() < m_encoderFenceValue.load())
+    if (m_encoderFence->GetCompletedValue() < m_encoderFenceValue)
     {
         // Wait for the fence to be set from GPU.
         ThrowIfFailed(m_encoderFence->SetEventOnCompletion(m_encoderFenceValue, m_encodeCompletedEvent.Get()));
-        DWORD result = WaitForSingleObject(m_encodeCompletedEvent.Get(), INFINITE);
-        if (result != WAIT_OBJECT_0)
+        HANDLE events[] = { m_encodeCompletedEvent.Get(), termintateEvent.Get() };
+        DWORD result = WaitForMultipleObjects(_countof(events), events, FALSE, INFINITE);
+        if (result == WAIT_OBJECT_0)
+        {
+        }
+        else if (result == WAIT_OBJECT_0 + 1)
+        {
+            // Terminated
+            return false;
+        }
+        else
             throw std::runtime_error("WaitForSingleObject() failed: " + GetLastError());
     }
 
-    const auto encodedFrame = ReadEncodedData();
-    if (m_flushRequested)
-    {
-        m_isFlushed = true;
-    }
-    else
-    {
-        PrepareForNextFrame();
-    }
+    ReadEncodedData(encodedData);
+    PrepareForNextFrame();
 
-    m_consumerToEncoderSemaphore.release();
-
-    return encodedFrame;
+    return true;
 }
+
 
 }

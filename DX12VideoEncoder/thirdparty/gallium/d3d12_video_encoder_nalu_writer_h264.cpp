@@ -22,6 +22,7 @@
  */
 
 #include "pch.h"
+#include "GalliumHelpers.h"
 #include "d3d12_video_encoder_nalu_writer_h264.h"
 
 void

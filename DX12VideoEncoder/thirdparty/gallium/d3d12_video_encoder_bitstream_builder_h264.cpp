@@ -22,6 +22,7 @@
  */
 
 #include "pch.h"
+#include "GalliumHelpers.h"
 #include "d3d12_video_encoder_bitstream_builder_h264.h"
 
 

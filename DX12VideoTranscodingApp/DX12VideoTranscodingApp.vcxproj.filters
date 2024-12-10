@@ -24,6 +24,9 @@
     <ClCompile Include="StreamWriter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PIX.h">
+      <Filter>Header Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="FFmpegHelpers.h">
@@ -33,6 +36,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="StreamWriter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FfmpegFrameData.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

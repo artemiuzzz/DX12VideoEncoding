@@ -8,10 +8,12 @@ class ReferenceFramesManager
 {
 public:
     ReferenceFramesManager(
-        uint32_t maxReferenceFrameCount,
-        bool GOPhasInterFrames,
         const ComPtr<ID3D12Device>& device,
-        const D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC& resolutionDesc);
+        const D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC& resolutionDesc,
+        DXGI_FORMAT inputFormat,
+        uint32_t maxReferenceFrameCount,
+        bool gopHasInterFrames
+    );
 
     D3D12_VIDEO_ENCODER_RECONSTRUCTED_PICTURE GetReconstructedPicture();
 
@@ -37,8 +39,8 @@ private:
 
 private:
     D3D12_VIDEO_ENCODER_PICTURE_CONTROL_CODEC_DATA_H264 m_currentH264PicData = {};
-    ComPtr<ID3D12Resource> m_reconstructuredPictureResource;
-    D3D12_VIDEO_ENCODER_RECONSTRUCTED_PICTURE m_reconstructuredPicture = {};
+    ComPtr<ID3D12Resource> m_reconstructedPictureResource;
+    D3D12_VIDEO_ENCODER_RECONSTRUCTED_PICTURE m_reconstructedPicture = {};
 
     std::vector<D3D12_VIDEO_ENCODER_REFERENCE_PICTURE_DESCRIPTOR_H264> m_referenceFrameDescriptors;
     std::vector<ID3D12Resource*> m_referenceFramesResources;
@@ -49,9 +51,10 @@ private:
 
     const ComPtr<ID3D12Device> m_device;
     const D3D12_VIDEO_ENCODER_PICTURE_RESOLUTION_DESC m_resolutionDesc;
+    const DXGI_FORMAT m_inputFormat;
     const uint32_t m_maxReferenceFrameCount;
+    const bool m_gopHasInterFrames;
     bool m_isCurrentFrameReference = false;
-    const bool m_GOPhasInterFrames;
 };
 
 }

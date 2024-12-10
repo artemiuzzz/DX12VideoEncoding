@@ -22,6 +22,7 @@
  */
 
 #include "pch.h"
+#include "GalliumHelpers.h"
 #include "d3d12_video_encoder_bitstream.h"
 
 d3d12_video_encoder_bitstream::d3d12_video_encoder_bitstream()

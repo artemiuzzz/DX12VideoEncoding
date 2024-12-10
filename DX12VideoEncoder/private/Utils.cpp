@@ -22,16 +22,19 @@ void ThrowIfFalse(bool condition)
     }
 }
 
+namespace {
+std::mutex g_logMutex;
+LogLevel g_currentLogLevel = LogLevel::E_DEBUG;
 }
 
-void debug_printf(const char* format, ...)
+void LogMessage(LogLevel level, std::string_view message)
 {
-#ifdef _DEBUG
-    va_list ap;
-    va_start(ap, format);
-    vprintf(format, ap);
-    va_end(ap);
-#else
-    (void)format; /* silence warning */
-#endif
+    if (level > g_currentLogLevel)
+    {
+        return;
+    }
+    std::lock_guard guard(g_logMutex);
+    std::cout << message << std::endl;
 }
+
+} // namespace DX12VideoEncoding

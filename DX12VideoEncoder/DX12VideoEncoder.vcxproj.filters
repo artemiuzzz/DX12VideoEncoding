@@ -1,14 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="Source Files">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
-    </Filter>
-    <Filter Include="Header Files">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
-    </Filter>
     <Filter Include="Resource Files">
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
@@ -19,26 +11,15 @@
     <Filter Include="thirdparty\gallium">
       <UniqueIdentifier>{3ae52c03-3050-4c48-9f90-123dca6af506}</UniqueIdentifier>
     </Filter>
+    <Filter Include="private">
+      <UniqueIdentifier>{197c97d2-234f-4b27-a803-1fa81b7869dd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="public">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="framework.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="pch.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Encoder.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Utils.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="FrameNV12.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ReferenceFramesManager.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="thirdparty\gallium\d3d12_video_encoder_bitstream.h">
       <Filter>thirdparty\gallium</Filter>
     </ClInclude>
@@ -51,20 +32,35 @@
     <ClInclude Include="thirdparty\gallium\d3d12_video_encoder_nalu_writer_h264.h">
       <Filter>thirdparty\gallium</Filter>
     </ClInclude>
+    <ClInclude Include="EncoderAPI.h">
+      <Filter>public</Filter>
+    </ClInclude>
+    <ClInclude Include="private\EncoderH264.h">
+      <Filter>private</Filter>
+    </ClInclude>
+    <ClInclude Include="private\EncoderH264DX12.h">
+      <Filter>private</Filter>
+    </ClInclude>
+    <ClInclude Include="private\framework.h">
+      <Filter>private</Filter>
+    </ClInclude>
+    <ClInclude Include="private\InputFrameResources.h">
+      <Filter>private</Filter>
+    </ClInclude>
+    <ClInclude Include="private\pch.h">
+      <Filter>private</Filter>
+    </ClInclude>
+    <ClInclude Include="private\ReferenceFramesManager.h">
+      <Filter>private</Filter>
+    </ClInclude>
+    <ClInclude Include="Utils.h">
+      <Filter>public</Filter>
+    </ClInclude>
+    <ClInclude Include="private\GalliumHelpers.h">
+      <Filter>private</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="pch.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Encoder.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="Utils.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="ReferenceFramesManager.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="thirdparty\gallium\d3d12_video_encoder_bitstream.cpp">
       <Filter>thirdparty\gallium</Filter>
     </ClCompile>
@@ -73,6 +69,27 @@
     </ClCompile>
     <ClCompile Include="thirdparty\gallium\d3d12_video_encoder_nalu_writer_h264.cpp">
       <Filter>thirdparty\gallium</Filter>
+    </ClCompile>
+    <ClCompile Include="private\EncoderH264.cpp">
+      <Filter>private</Filter>
+    </ClCompile>
+    <ClCompile Include="private\EncoderH264DX12.cpp">
+      <Filter>private</Filter>
+    </ClCompile>
+    <ClCompile Include="private\InputFrameResources.cpp">
+      <Filter>private</Filter>
+    </ClCompile>
+    <ClCompile Include="private\pch.cpp">
+      <Filter>private</Filter>
+    </ClCompile>
+    <ClCompile Include="private\ReferenceFramesManager.cpp">
+      <Filter>private</Filter>
+    </ClCompile>
+    <ClCompile Include="private\Utils.cpp">
+      <Filter>private</Filter>
+    </ClCompile>
+    <ClCompile Include="private\GalliumHelpers.cpp">
+      <Filter>private</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

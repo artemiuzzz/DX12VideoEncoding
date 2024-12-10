@@ -13,8 +13,8 @@
 #include <set>
 #include <string>
 #include <memory>
-#include <semaphore>
 #include <string_view>
+#include <optional>
 
 #include <Windows.h>
 #include <wrl.h>

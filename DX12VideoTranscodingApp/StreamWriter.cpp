@@ -67,13 +67,19 @@ void StreamWriter::OpenOutputFile(const char* outFilename, int width, int height
     }
 }
 
-void StreamWriter::WriteVideoPacket(const uint8_t* data, size_t size, bool isKeyFrame, int64_t pts, int64_t duration)
+void StreamWriter::WriteVideoPacket(
+    const uint8_t* data,
+    size_t size,
+    bool isKeyFrame,
+    int64_t pts,
+    int64_t dts,
+    int64_t duration)
 {
     pkt->data = (uint8_t*)data;
     pkt->size = size;
     pkt->stream_index = 0;
     pkt->pts = pts;
-    pkt->dts = pts;
+    pkt->dts = dts;
     pkt->duration = duration;
 
     const AVRational &streamTimeBase = ofmt_ctx->streams[0]->time_base;

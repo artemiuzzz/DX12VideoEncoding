@@ -1,4 +1,5 @@
 #include "StreamReader.h"
+#include "FFmpegHelpers.h"
 #include <stdexcept>
 
 StreamReader::~StreamReader()
@@ -87,7 +88,8 @@ void StreamReader::ReadAllFrames(const TFrameCallback& frameCallback)
     if (ret == AVERROR_EOF)
     {
         /* signal EOF to the filtergraph */
-        if (av_buffersrc_add_frame_flags(buffersrc_ctx, nullptr, 0) < 0)
+        ret = av_buffersrc_add_frame_flags(buffersrc_ctx, nullptr, 0);
+        if (ret < 0)
         {
             throw std::runtime_error("Error while closing the filtergraph: " + av_error_to_string(ret));
         }
